@@ -5,21 +5,7 @@ from stratergies.sontinh_strg import SonTinhStrategy
 from aiomql import Bot, ForexSymbol
 from utils.logger import logger
 from aiomql import Session, Sessions, ForexSymbol, Chaos
-import json
-import sys
-
-
-def load_config_from_json():
-    try:
-        with open("config.json", 'r') as f:
-            config = json.load(f)
-        return config
-    except FileNotFoundError:
-        logger.error(
-            "Config file not found. You need to create file config: config.json on same path of exec file.")
-        input("Press Enter to exit...")
-        sys.exit(1)
-
+from config.config import load_config_from_json
 
 load_config = load_config_from_json()
 config = Config(login=load_config.get('login'),
@@ -32,7 +18,7 @@ async def main():
     logger.info("Start BOT")
     bot = Bot()
     syms = ["XAUUSD"]
-    strategies = [SonTinhStrategy(symbol=ForexSymbol(name=sym))
+    strategies = [SonTinhStrategy()
                   for sym in syms]
     bot.add_strategies(strategies=strategies)
     await bot.start()

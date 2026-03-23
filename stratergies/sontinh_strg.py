@@ -20,7 +20,8 @@ class SonTinhStrategy(Strategy):
     time_frame: TimeFrame = config.timeframe
     candles_count: int = 500  # Enough for EMA 200 and ATR baseline
 
-    def __init__(self, *, symbol: ForexSymbol, trader=None, name="SonTinhBot"):
+    def __init__(self, *, trader=None, name="SonTinhBot"):
+        symbol = ForexSymbol(name=config.symbol)
         list_sessions = [Session(
             name=s['name'], start=s['start'], end=s['end']) for s in config.sessions]
         sessions_mgr = Sessions(sessions=list_sessions)

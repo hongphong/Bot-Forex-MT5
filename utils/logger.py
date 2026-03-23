@@ -2,15 +2,23 @@ import logging
 import logging
 import os
 from logging.handlers import RotatingFileHandler
-
-# logging.basicConfig(level=logging.INFO)
+from config.config import load_config_from_json, BASE_DIR
+config = load_config_from_json()
+level = logging.INFO
+if config.get('log_level') == 'DEBUG':
+    level = logging.DEBUG
+elif config.get('log_level') == 'INFO':
+    level = logging.INFO
+elif config.get('log_level') == 'ERROR':
+    level = logging.ERROR
+if level == logging.DEBUG:
+    logging.basicConfig(level=logging.DEBUG)
 # Define absolute path for the logs directory relative to the project structure
 # bot/utils/logger.py -> bot/logs
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_LOG_DIR = os.path.join(BASE_DIR, 'logs')
 
 
-def setup_logger(name: str = "bot_logger", log_dir: str = DEFAULT_LOG_DIR, level: int = logging.INFO) -> logging.Logger:
+def setup_logger(name: str = "bot_logger", log_dir: str = DEFAULT_LOG_DIR, level: int = level) -> logging.Logger:
     """
     Initializes and returns a logger that writes to both console and a log file.
 
