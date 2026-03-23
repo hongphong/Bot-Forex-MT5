@@ -39,7 +39,7 @@ class SonTinhConfig:
 
     # TP/SL rules
     # Initial SL: 30-50 pips. Let's default to conservative 40 pips.
-    initial_sl_pips: int = 30
+    initial_sl_pips: int = 200
 
     # TP Target in USD
     tp_target_usd: float = 3.0

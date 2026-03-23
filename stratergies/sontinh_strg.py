@@ -65,6 +65,7 @@ class SonTinhStrategy(Strategy):
 
     async def find_entry(self):
         """Analyze market condition and search for entry signals."""
+        # start find new entry
         rates = await self.symbol.copy_rates_from_pos(timeframe=self.time_frame, count=self.candles_count)
         if rates is None or len(rates) < self.ema_slow + 2:
             logger.warning(
@@ -88,7 +89,7 @@ class SonTinhStrategy(Strategy):
                 Current Price: {current_price}
         """)
         # test order
-        # self.tracker.update(order_type=OrderType.BUY,
+        # self.tracker.update(order_type=OrderType.SELL,
         #                     snooze=self.tracker.snooze)
         # return
         rates.rename(**{

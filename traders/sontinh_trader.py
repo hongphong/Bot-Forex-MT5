@@ -49,6 +49,8 @@ class SonTinhTrader(Trader):
 
     async def manage_dca(self):
         """Checks for 50 pips drawdown on the last position to add a new DCA order."""
+        logger.info(
+            "[MANAGE DCA] -------- Checking for DCA trigger ---------------")
         try:
             open_positions = await self.positions.get_positions(symbol=self.symbol.name)
             if not open_positions:
@@ -71,7 +73,7 @@ class SonTinhTrader(Trader):
                 pips_loss = (current_price -
                              last_position.price_open) / self.symbol.pip
             logger.info(
-                f"Pips loss: {pips_loss} - Current price: {current_price} - Last price: {last_position.price_open}")
+                f"[MANAGE DCA] Pips loss: {pips_loss} - Current price: {current_price} - Last price: {last_position.price_open}")
             if pips_loss >= config.martingale_loss_trigger_pips:
                 logger.info(
                     f"[MANAGE DCA] DCA TRIGGERED! Previous position {last_position.ticket} is down {pips_loss:.1f} pips.")
@@ -82,7 +84,9 @@ class SonTinhTrader(Trader):
                     f"[MANAGE DCA] DCA NOT TRIGGERED! Previous position {last_position.ticket} is down {pips_loss:.1f} pips.")
 
         except Exception as e:
-            logger.error(f"Error managing DCA: {e}")
+            logger.error(f"[MANAGE DCA] Error managing DCA: {e}")
+        logger.info(
+            "[MANAGE DCA] -------- End Checking for DCA trigger ---------------")
 
     async def place_trade(self, *, order_type: OrderType, parameters: Dict[str, Any] = None, atr: float = None):
         """Places a new trade with the appropriate lot size."""
@@ -101,7 +105,7 @@ class SonTinhTrader(Trader):
             lot_size = await self._calculate_next_lot(open_positions)
 
             sl = config.initial_sl_pips * self.symbol.pip
-
+            tp = config.tp_target_usd / self.symbol.pip
             # Use aiomql Trader to compute SL and set volume
             tick = await self.symbol.info_tick()
             price = tick.ask if order_type.is_long else tick.bid
@@ -109,29 +113,23 @@ class SonTinhTrader(Trader):
             # SL price
             if order_type.is_long:
                 sl_price = price - sl
+                tp_value = price + tp
             else:
                 sl_price = price + sl
+                tp_value = price - tp
             # We create an order without stops first, to use custom volume
             await self.create_order_no_stops(order_type=order_type, volume=lot_size)
             sl_value = round(sl_price, self.symbol.digits)
-            tp_value = 0
-            if order_type.is_long:
-                tp_value = round(
-                    price + (1000 * self.symbol.pip), self.symbol.digits)
-            else:
-                tp_value = round(
-                    price - (1000 * self.symbol.pip), self.symbol.digits)
 
             logger.info(f""" [PLACE TRADE]
                 Start Order: {self.order}
                 Order Type: {"BUY" if order_type.is_long else "SELL"}
                 Price: {price}
                 Volume: {lot_size}
-                SL: {sl_value}
-                TP: {tp_value}
+                SL: {sl_value} (Price - Initial SL * Lot: {price} - {sl}*{lot_size})
+                TP: {tp_value} (Price + Target Profit * Lot: {price} + {config.tp_target_usd}*{lot_size})
                 Ask price: {tick.ask}
                 Bid price: {tick.bid}
-                Init SL config: {sl}
             """)
             self.order.set_attributes(
                 sl=sl_value, tp=tp_value, volume=lot_size, price=price)
@@ -162,18 +160,24 @@ class SonTinhTrader(Trader):
             account_info = await self.order.mt5.account_info()
             if account_info:
                 # Max Drawdown check
+                logger.info(
+                    f"[MANAGE OPEN POSITIONS] ------------ Checking Drawdown ------------")
                 equity = account_info.equity
                 balance = account_info.balance
+                logger.info(
+                    f"[MANAGE OPEN POSITIONS] Equity: {equity} - Balance: {balance}")
                 drawdown_pct = ((balance - equity) / balance) * \
                     100 if balance > 0 else 0
                 logger.info(
-                    f"[MANAGE OPEN POSITIONS] Current drawdown percentage: {drawdown_pct}%")
+                    f"[MANAGE OPEN POSITIONS] Current drawdown percentage: {drawdown_pct} %")
                 if drawdown_pct >= config.max_drawdown_percent:
                     logger.critical(
-                        f"[MANAGE OPEN POSITIONS] MAX DRAWDOWN REACHED ({drawdown_pct:.2f}%). Closing all positions.")
+                        f"[MANAGE OPEN POSITIONS] MAX DRAWDOWN REACHED ({drawdown_pct:.2f} %). Closing all positions.")
                     await self.positions.close_all_positions()
                     logger.info("Exiting the bot...")
                     sys.exit(0)
+                logger.info(
+                    f"[MANAGE OPEN POSITIONS] ------------ End Checking Drawdown ------------")
 
             # Important: First check DCA to add positions if needed
             await self.manage_dca()
@@ -190,7 +194,7 @@ class SonTinhTrader(Trader):
             for pos in open_positions:
                 profit = pos.profit
                 logger.info(
-                    f"[MANAGE OPEN POSITIONS] Position {pos.ticket} profit: {profit}")
+                    f"[MANAGE OPEN POSITIONS] ------------------- Checking Position {pos.ticket} profit: {profit} Target TP: {config.tp_target_usd} --------------------")
 
                 # Check for fixed TP (TP target USD)
                 if profit >= config.tp_target_usd:
@@ -203,24 +207,28 @@ class SonTinhTrader(Trader):
 
                 # 1. Partial TP check
                 if profit >= config.partial_tp_trigger_usd and pos.ticket not in self._partially_closed_tickets:
-                    logger.info(
-                        f"[MANAGE OPEN POSITIONS] Partial TP trigger hit for ticket {pos.ticket}. Securing profit.")
                     close_vol = pos.volume * config.partial_tp_percent
                     close_vol = max(self.symbol.volume_min, round(
                         close_vol / self.symbol.volume_step) * self.symbol.volume_step)
+                    logger.info(
+                        f"[MANAGE OPEN POSITIONS] Check Partial TP - Position [{pos.ticket}] - volume: {pos.volume} - profit: {profit} USD - Target close volume: {close_vol}")
                     if close_vol < pos.volume:
+                        logger.info(
+                            f"[MANAGE OPEN POSITIONS] Check Partial TP: Partial TP trigger hit for ticket {pos.ticket}. Closing {close_vol} volume.")
                         await self.positions.close(ticket=pos.ticket, symbol=pos.symbol, price=tick.bid if pos.type.is_long else tick.ask, volume=close_vol, order_type=pos.type)
                         self._partially_closed_tickets.append(pos.ticket)
                     continue
 
                 # 2. Partial SL check (Tỉa lệnh khi âm)
                 if profit <= config.partial_sl_trigger_usd and pos.ticket not in self._partially_closed_tickets:
-                    logger.info(
-                        f"[MANAGE OPEN POSITIONS] Partial SL trigger hit for ticket {pos.ticket}. Cutting losses.")
                     close_vol = pos.volume * config.partial_sl_percent
                     close_vol = max(self.symbol.volume_min, round(
                         close_vol / self.symbol.volume_step) * self.symbol.volume_step)
+                    logger.info(
+                        f"[MANAGE OPEN POSITIONS] Check Partial SL - Position [{pos.ticket}] - volume: {pos.volume} - profit: {profit} USD - Target close volume: {close_vol}")
                     if close_vol < pos.volume:
+                        logger.info(
+                            f"[MANAGE OPEN POSITIONS] Check Partial SL: Partial SL trigger hit for ticket {pos.ticket}. Closing {close_vol} volume.")
                         await self.positions.close(ticket=pos.ticket, symbol=pos.symbol, price=tick.bid if pos.type.is_long else tick.ask, volume=close_vol, order_type=pos.type)
                         self._partially_closed_tickets.append(pos.ticket)
                     continue
@@ -258,6 +266,8 @@ class SonTinhTrader(Trader):
                         if res and res.retcode == 10009:
                             logger.info(
                                 f"[MANAGE OPEN POSITIONS] Modified Trailing SL for short position {pos.ticket} to {new_sl}")
+                logger.info(
+                    f"[MANAGE OPEN POSITIONS] ------------------- End checking Position {pos.ticket} --------------------")
 
         except Exception as e:
             logger.error(
