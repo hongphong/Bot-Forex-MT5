@@ -104,8 +104,8 @@ class SonTinhTrader(Trader):
 
             lot_size = await self._calculate_next_lot(open_positions)
 
-            sl = config.initial_sl_pips * self.symbol.pip
-            tp = config.tp_target_usd / self.symbol.pip
+            sl = config.initial_sl_pips / (config.lot_start * 1000)
+            tp = (config.tp_target_usd / self.symbol.pip) / (config.lot_start * 1000)
             # Use aiomql Trader to compute SL and set volume
             tick = await self.symbol.info_tick()
             price = tick.ask if order_type.is_long else tick.bid

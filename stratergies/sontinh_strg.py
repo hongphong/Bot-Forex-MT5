@@ -1,4 +1,4 @@
-from aiomql import Strategy, ForexSymbol, TimeFrame, OrderType, Tracker, Sessions, Session
+from aiomql import Strategy, ForexSymbol, TimeFrame, OrderType, Tracker, Sessions, Session, Positions
 from traders.sontinh_trader import SonTinhTrader
 from utils.logger import logger
 from config.sonting_config import config
@@ -19,6 +19,7 @@ class SonTinhStrategy(Strategy):
     atr_period: int = config.atr_period
     time_frame: TimeFrame = config.timeframe
     candles_count: int = 500  # Enough for EMA 200 and ATR baseline
+    positions: Positions
 
     def __init__(self, *, trader=None, name="SonTinhBot"):
         symbol = ForexSymbol(name=config.symbol)
@@ -31,6 +32,7 @@ class SonTinhStrategy(Strategy):
         # Interval matches timeframe M5 = 300 seconds
         self.tracker = Tracker(snooze=self.time_frame.seconds)
         self.trader = trader or SonTinhTrader(symbol=self.symbol)
+        self.positions = Positions()
 
         # Keep track of latest ATR for the trader to use for trailing SL
         self.current_atr: float = 0.0
@@ -110,11 +112,11 @@ class SonTinhStrategy(Strategy):
         tick = await self.symbol.info_tick()
         logger.info(f"Tick info: \n{tick}")
 
-        if not await self._check_filters(tick, self.current_atr, atr_avg):
-            self.tracker.update(order_type=None, snooze=self.tracker.snooze)
-            return
-        else:
-            logger.info("Filter passed, continue to next step")
+        # if not await self._check_filters(tick, self.current_atr, atr_avg):
+        #     self.tracker.update(order_type=None, snooze=self.tracker.snooze)
+        #     return
+        # else:
+        #     logger.info("Filter passed, continue to next step")
 
         # Trend conditions based on last 2 candles
         # Increase: EMA 50 > EMA 200 (On last 2 candles)
@@ -142,7 +144,7 @@ class SonTinhStrategy(Strategy):
 
         elif downtrend and current_rsi > config.rsi_sell_threshold and distance_pct <= config.ema_pullback_buffer_percent:
             signal = OrderType.SELL
-
+        signal = OrderType.BUY
         if signal is not None:
             logger.info(f"Signal: {signal} Found...")
             self.tracker.update(order_type=signal, snooze=self.tracker.snooze)
@@ -156,24 +158,29 @@ class SonTinhStrategy(Strategy):
 
         try:
             # 1. Manage existing open positions (Trailing SL / Partial Closes)
-            if hasattr(self.trader, 'manage_open_positions'):
-                await self.trader.manage_open_positions(current_atr=self.current_atr)
+            check_opened_position = await self.positions.get_positions(symbol=self.symbol.name)
+            if check_opened_position:
+                logger.info(
+                    f"Position Opened. Wait for manage_open_positions")  
 
-            # 2. Look for new entries
-            await self.find_entry()
+                if hasattr(self.trader, 'manage_open_positions'):
+                    await self.trader.manage_open_positions(current_atr=self.current_atr)                
+            else:                          
+                # 2. Look for new entries
+                await self.find_entry()
 
-            # 3. Place Trade if Signal exists
-            if self.tracker.order_type is not None:
-                await self.trader.place_trade(
-                    order_type=self.tracker.order_type,
-                    atr=self.current_atr
-                )
+                # 3. Place Trade if Signal exists
+                if self.tracker.order_type is not None:
+                    await self.trader.place_trade(
+                        order_type=self.tracker.order_type,
+                        atr=self.current_atr
+                    )
 
             # 4. Sleep until next timeframe or tick condition
             logger.info(
-                f"Sleep for {self.tracker.snooze} seconds to wait next candle")
-            await self.sleep(secs=self.tracker.snooze)
+                f"Sleep for {5} seconds to wait next candle")
+            await self.sleep(secs=5)
 
         except Exception as e:
             logger.error(f"Error in {self.name} trade loop: {e}")
-            await self.sleep(secs=self.tracker.snooze)
+            await self.sleep(secs=5)
